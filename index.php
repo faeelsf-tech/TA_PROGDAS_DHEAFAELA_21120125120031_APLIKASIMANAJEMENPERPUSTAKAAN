@@ -11,6 +11,8 @@ class Book {
     private $author;
     private $isBorrowed;
     private $dueDate;
+    // --- FITUR BARU: isLost ---
+    private $isLost;
 
     public function __construct($id, $title, $author) {
         $this->id = $id;
@@ -18,6 +20,8 @@ class Book {
         $this->author = $author;
         $this->isBorrowed = false;
         $this->dueDate = null;
+        // Inisialisasi status hilang
+        $this->isLost = false;
     }
 
     public function getId() { return $this->id; }
@@ -25,15 +29,25 @@ class Book {
     public function getAuthor() { return $this->author; }
     public function getIsBorrowed() { return $this->isBorrowed; }
     public function getDueDate() { return $this->dueDate; }
+    // Getter & Setter untuk isLost
+    public function getIsLost() { return $this->isLost; }
+    public function markAsLost() { $this->isLost = true; $this->isBorrowed = true; } // Anggap buku hilang juga berarti dipinjam (tidak tersedia)
+    public function markAsFound() { $this->isLost = false; $this->isBorrowed = false; }
 
     public function borrow($days = 7) {
-        $this->isBorrowed = true;
-        $this->dueDate = date('Y-m-d', strtotime("+$days days"));
+        // Hanya bisa dipinjam jika tidak hilang
+        if (!$this->isLost) {
+            $this->isBorrowed = true;
+            $this->dueDate = date('Y-m-d', strtotime("+$days days"));
+        }
     }
 
     public function returnBook() {
-        $this->isBorrowed = false;
-        $this->dueDate = null;
+        // Hanya bisa dikembalikan jika tidak hilang
+        if (!$this->isLost) {
+            $this->isBorrowed = false;
+            $this->dueDate = null;
+        }
     }
 }
 
@@ -203,7 +217,10 @@ if (isset($_SESSION['user'])) {
 
     if (isset($_POST['borrow_id'])) {
         $id = $_POST['borrow_id'];
-        if (count($currentUser->getHistory()) >= 3) { $message = "Batas maksimal 3 buku!"; $messageType = "error"; }
+        // Cek apakah buku hilang
+        if ($books[$id]->getIsLost()) {
+            $message = "Buku ini dilaporkan hilang dan tidak dapat dipinjam."; $messageType = "error";
+        } elseif (count($currentUser->getHistory()) >= 3) { $message = "Batas maksimal 3 buku!"; $messageType = "error"; }
         else {
             if (!$books[$id]->getIsBorrowed()) {
                 $books[$id]->borrow(); $currentUser->addBorrowedBook($id);
@@ -224,6 +241,42 @@ if (isset($_SESSION['user'])) {
             $_SESSION['books'] = serialize($books); $_SESSION['user'] = serialize($currentUser);
         }
     }
+
+    // --- LOGIKA BARU: Laporkan Buku Hilang ---
+    if (isset($_GET['action']) && $_GET['action'] == 'report_lost') {
+        $id = $_GET['book_id'];
+        if (isset($books[$id])) {
+            $books[$id]->markAsLost();
+            $_SESSION['books'] = serialize($books);
+            $message = "Buku '{$books[$id]->getTitle()}' berhasil dilaporkan hilang."; $messageType = "warning";
+            header("Location: index.php?page=books"); exit();
+        }
+    }
+
+    // --- LOGIKA BARU: Buku Sudah Ditemukan ---
+    if (isset($_GET['action']) && $_GET['action'] == 'found_book') {
+        $id = $_GET['book_id'];
+        if (isset($books[$id]) && $books[$id]->getIsLost()) {
+            $books[$id]->markAsFound();
+            $_SESSION['books'] = serialize($books);
+            $message = "Buku '{$books[$id]->getTitle()}' berhasil ditandai sudah ditemukan."; $messageType = "success";
+            header("Location: index.php?page=books"); exit();
+        }
+    }
+    
+    // --- LOGIKA BARU: Sortir Buku ---
+    $booksArray = $books; // Gunakan array untuk sorting
+    if (isset($_GET['sort']) && $_GET['sort'] == 'asc') {
+        usort($booksArray, function($a, $b) {
+            return strcmp($a->getTitle(), $b->getTitle());
+        });
+    } elseif (isset($_GET['sort']) && $_GET['sort'] == 'desc') {
+        usort($booksArray, function($a, $b) {
+            return strcmp($b->getTitle(), $a->getTitle());
+        });
+    }
+    // Jika tidak ada sort, gunakan urutan default dari $books
+    $allBooks = $booksArray;
 }
 ?>
 
@@ -279,7 +332,7 @@ if (isset($_SESSION['user'])) {
         .notif-warning { background: linear-gradient(135deg, #F59E0B, #D97706); }
         @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
-        /* --- LOGIN WRAPPER --- */
+        /* --- LOGIN WRAPPER (Tidak ada perubahan) --- */
         .login-wrapper { width: 100%; max-width: 450px; padding: 20px; margin: auto; }
         .card {
             background: var(--white); border-radius: 24px; padding: 40px;
@@ -353,6 +406,36 @@ if (isset($_SESSION['user'])) {
             padding-left: 12px;
         }
         .logout-btn { margin-top: auto; color: #EF4444; }
+        /* --- CSS BARU UNTUK LAPOR BUKU HILANG --- */
+        .lost-link { 
+            margin-top: 20px; 
+            padding-top: 15px; 
+            border-top: 1px dashed #E5E7EB; 
+        }
+        .lost-link .nav-link { 
+            background: #FEE2E2; 
+            color: #DC2626; 
+            font-weight: 600; 
+            border: 1px solid #FCA5A5;
+        }
+        .lost-link .nav-link:hover { 
+            background: #FCA5A5; 
+            color: white; 
+            border-left: 3px solid #DC2626;
+        }
+        /* --- CSS BARU UNTUK BUKU SUDAH DITEMUKAN --- */
+        .found-link .nav-link { 
+            background: #D1FAE5; 
+            color: #059669; 
+            font-weight: 600; 
+            border: 1px solid #6EE7B7;
+            margin-top: 5px;
+        }
+        .found-link .nav-link:hover { 
+            background: #6EE7B7; 
+            color: white; 
+            border-left: 3px solid #059669;
+        }
 
         .main-content { flex: 1; padding: 40px; overflow-y: auto; background-color: #FDFDFD; } /* Background sedikit beda dari sidebar */
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; border-bottom: 1px solid #eee; padding-bottom: 20px; }
@@ -368,12 +451,29 @@ if (isset($_SESSION['user'])) {
         .stat-title { color: #888; font-size: 13px; margin-bottom: 5px; }
         .stat-value { font-size: 24px; font-weight: 700; color: var(--dark); }
 
+        .search-sort-container { 
+            display: flex; 
+            gap: 15px; 
+            margin-bottom: 25px; 
+        }
         .search-box { 
-            width: 100%; margin-bottom: 25px; padding: 15px 20px; border-radius: 15px; 
+            flex: 1; 
+            padding: 15px 20px; border-radius: 15px; 
             border: 1px solid #E5E7EB; font-family: inherit; transition: 0.3s;
             background: #fff;
         }
         .search-box:focus { border-color: var(--accent); }
+        
+        /* --- CSS BARU UNTUK SORTIR --- */
+        .sort-control { 
+            width: 200px; 
+            padding: 15px 20px; 
+            border-radius: 15px; 
+            border: 1px solid #E5E7EB; 
+            background: #fff;
+            cursor: pointer;
+        }
+        .sort-control:focus { outline: none; border-color: var(--secondary); }
 
         .book-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 25px; }
         .book-card {
@@ -388,13 +488,17 @@ if (isset($_SESSION['user'])) {
         }
         .tag-avail { background: #DCFCE7; color: #166534; }
         .tag-borrowed { background: #FEE2E2; color: #991B1B; }
+        /* --- CSS BARU UNTUK TAG HILANG --- */
+        .tag-lost { background: #FCE7F6; color: #9D174D; }
+        
         .book-title { font-weight: 600; font-size: 15px; color: var(--dark); margin-bottom: 5px; line-height: 1.4; }
         .book-author { font-size: 12px; color: #888; margin-bottom: 15px; }
         
         .btn-borrow, .btn-return { width: 100%; padding: 10px; border-radius: 10px; border: none; font-weight: 600; cursor: pointer; transition: 0.2s; font-size: 13px; }
         .btn-borrow { background: var(--dark); color: white; }
         .btn-borrow:hover { background: var(--secondary); }
-        .btn-borrow:disabled { background: #ccc; cursor: not-allowed; }
+        /* Menonaktifkan jika buku hilang/dipinjam */
+        .btn-borrow:disabled { background: #ccc; cursor: not-allowed; } 
         .btn-return { background: #FFF1F2; color: #BE123C; border: 1px solid #FECDD3; }
         .btn-return:hover { background: #FECDD3; }
 
@@ -421,9 +525,9 @@ if (isset($_SESSION['user'])) {
                 <div class="form-group">
                     <label>Nama Lengkap</label>
                     <input type="text" name="nama" class="form-control" placeholder="Masukkan nama" 
-                           pattern="[A-Za-z\s]+" 
-                           title="Nama hanya boleh mengandung huruf dan spasi."
-                           required>
+                            pattern="[A-Za-z\s]+" 
+                            title="Nama hanya boleh mengandung huruf dan spasi."
+                            required>
                 </div>
                 <div class="form-group">
                     <label>NIM (Hanya Angka)</label>
@@ -452,7 +556,7 @@ if (isset($_SESSION['user'])) {
 
     <?php else: 
         $user = unserialize($_SESSION['user']);
-        $allBooks = unserialize($_SESSION['books']);
+        // $allBooks sudah di-load dan di-sort di bagian logika PHP
         $history = $user->getHistory();
     ?>
     <div class="dashboard-container">
@@ -470,6 +574,12 @@ if (isset($_SESSION['user'])) {
                 <li class="nav-item"><a href="?page=books" class="nav-link <?= (!isset($_GET['page']) || $_GET['page']=='books') ? 'active' : '' ?>">📚 Peminjaman Buku</a></li>
                 <li class="nav-item"><a href="?page=history" class="nav-link <?= (isset($_GET['page']) && $_GET['page']=='history') ? 'active' : '' ?>">⏱️ Riwayat & Kembalikan</a></li>
                 <li class="nav-item"><a href="?page=profile" class="nav-link <?= (isset($_GET['page']) && $_GET['page']=='profile') ? 'active' : '' ?>">👤 Profil Anggota</a></li>
+            </ul>
+            <ul class="nav-menu lost-link">
+                <li class="nav-item"><a href="?page=report_lost" class="nav-link <?= (isset($_GET['page']) && $_GET['page']=='report_lost') ? 'active' : '' ?>">🚨 Laporkan Buku Hilang</a></li>
+                <li class="nav-item found-link"><a href="?page=find_book" class="nav-link <?= (isset($_GET['page']) && $_GET['page']=='find_book') ? 'active' : '' ?>">✅ Buku Sudah Ditemukan</a></li>
+            </ul>
+            <ul class="nav-menu">
                 <li class="nav-item"><a href="?action=logout" class="nav-link logout-btn">🚪 Sign Out</a></li>
             </ul>
         </div>
@@ -482,15 +592,42 @@ if (isset($_SESSION['user'])) {
                         <span class="stat-title">Kuota Pinjam</span><div class="stat-value" style="font-size:18px; color:var(--primary);"><?= count($history) ?> / 3</div>
                     </div>
                 </div>
-                <input type="text" id="searchBook" class="search-box" placeholder="Cari judul buku atau penulis..." onkeyup="filterBooks()">
+                
+                <div class="search-sort-container">
+                    <input type="text" id="searchBook" class="search-box" placeholder="Cari judul buku atau penulis..." onkeyup="filterBooks()">
+                    <select id="sortControl" class="sort-control" onchange="window.location.href='?page=books&sort=' + this.value">
+                        <option value="" disabled selected>--- Urutkan ---</option>
+                        <option value="asc" <?= (isset($_GET['sort']) && $_GET['sort'] == 'asc') ? 'selected' : '' ?>>Judul A-Z</option>
+                        <option value="desc" <?= (isset($_GET['sort']) && $_GET['sort'] == 'desc') ? 'selected' : '' ?>>Judul Z-A</option>
+                    </select>
+                </div>
                 <div class="book-grid" id="bookContainer">
-                    <?php foreach($allBooks as $book): ?>
-                    <div class="book-card search-item">
-                        <span class="book-tag <?= $book->getIsBorrowed() ? 'tag-borrowed' : 'tag-avail' ?>"><?= $book->getIsBorrowed() ? 'Dipinjam' : 'Tersedia' ?></span>
-                        <div><div class="book-title"><?= $book->getTitle() ?></div><div class="book-author">Oleh <?= $book->getAuthor() ?></div></div>
-                        <?php if(!$book->getIsBorrowed()): ?>
+                    <?php 
+                    // Menggunakan $allBooks yang sudah disortir
+                    foreach($allBooks as $book): 
+                        $is_not_avail = $book->getIsBorrowed() || $book->getIsLost();
+                    ?>
+                    <div class="book-card search-item" data-id="<?= $book->getId() ?>">
+                        <?php if ($book->getIsLost()): ?>
+                            <span class="book-tag tag-lost">Hilang</span>
+                        <?php elseif ($book->getIsBorrowed()): ?>
+                            <span class="book-tag tag-borrowed">Dipinjam</span>
+                        <?php else: ?>
+                            <span class="book-tag tag-avail">Tersedia</span>
+                        <?php endif; ?>
+
+                        <div>
+                            <div class="book-title"><?= $book->getTitle() ?></div>
+                            <div class="book-author">Oleh <?= $book->getAuthor() ?></div>
+                        </div>
+
+                        <?php if(!$is_not_avail): ?>
                             <form method="POST"><input type="hidden" name="borrow_id" value="<?= $book->getId() ?>"><button type="submit" class="btn-borrow">Pinjam Buku</button></form>
-                        <?php else: ?><button disabled class="btn-borrow" style="opacity: 0.5;">Sedang Kosong</button><?php endif; ?>
+                        <?php else: ?>
+                            <button disabled class="btn-borrow" style="opacity: 0.5; background: <?= $book->getIsLost() ? '#DC2626' : '#9CA3AF' ?>; color: white;">
+                                <?= $book->getIsLost() ? 'HILANG - TIdak Tersedia' : 'Sedang Kosong' ?>
+                            </button>
+                        <?php endif; ?>
                     </div>
                     <?php endforeach; ?>
                 </div>
@@ -507,7 +644,7 @@ if (isset($_SESSION['user'])) {
                 <?php else: ?>
                     <div class="book-grid">
                         <?php foreach($history as $record): 
-                            $b = $allBooks[$record['id']];
+                            $b = $books[$record['id']];
                             $dueDate = date('Y-m-d', strtotime($record['borrowDate']. ' + 7 days'));
                             $today = date('Y-m-d');
                             $isLate = $today > $dueDate;
@@ -535,6 +672,62 @@ if (isset($_SESSION['user'])) {
                         <tr><th>Status</th><td>Aktif</td></tr>
                     </table>
                 </div>
+
+            <?php elseif ($_GET['page'] == 'report_lost'): ?>
+                <div class="header"><h2>Laporkan Buku Hilang</h2></div>
+                <div class="book-grid">
+                    <?php 
+                    // Hanya tampilkan buku yang sedang dipinjam oleh user DAN belum dilaporkan hilang
+                    $book_on_loan = false;
+                    foreach($history as $record): 
+                        $b = $books[$record['id']];
+                        if (!$b->getIsLost()):
+                            $book_on_loan = true;
+                    ?>
+                    <div class="book-card search-item" style="border-color: #EF4444;">
+                        <span class="book-tag tag-borrowed">Sedang Anda Pinjam</span>
+                        <div>
+                            <div class="book-title"><?= $b->getTitle() ?></div>
+                            <div class="book-author">Oleh <?= $b->getAuthor() ?></div>
+                        </div>
+                        <a href="?action=report_lost&book_id=<?= $b->getId() ?>" class="btn-return" style="background:#DC2626; color:white; border:none; text-align:center; text-decoration:none;">Laporkan Hilang</a>
+                    </div>
+                    <?php 
+                        endif;
+                    endforeach; 
+                    if(!$book_on_loan):
+                    ?>
+                        <div style="grid-column: 1 / -1; text-align:center; padding: 50px; color: #888;"><p>Tidak ada buku yang sedang Anda pinjam untuk dilaporkan hilang.</p></div>
+                    <?php endif; ?>
+                </div>
+
+            <?php elseif ($_GET['page'] == 'find_book'): ?>
+                <div class="header"><h2>Konfirmasi Buku Sudah Ditemukan</h2></div>
+                <div class="book-grid">
+                    <?php 
+                    // Hanya tampilkan buku yang berstatus hilang
+                    $book_is_lost = false;
+                    foreach($allBooks as $b): 
+                        if ($b->getIsLost()):
+                            $book_is_lost = true;
+                    ?>
+                    <div class="book-card search-item" style="border-color: #10B981;">
+                        <span class="book-tag tag-lost">DILAPORKAN HILANG</span>
+                        <div>
+                            <div class="book-title"><?= $b->getTitle() ?></div>
+                            <div class="book-author">Oleh <?= $b->getAuthor() ?></div>
+                        </div>
+                        <button onclick="confirmFound(<?= $b->getId() ?>, '<?= $b->getTitle() ?>')" class="btn-return" style="background:#059669; color:white; border:none;">Konfirmasi Sudah Ditemukan</button>
+                    </div>
+                    <?php 
+                        endif;
+                    endforeach; 
+                    if(!$book_is_lost):
+                    ?>
+                        <div style="grid-column: 1 / -1; text-align:center; padding: 50px; color: #888;"><p>Tidak ada buku yang saat ini dilaporkan hilang.</p></div>
+                    <?php endif; ?>
+                </div>
+
             <?php endif; ?>
         </div>
     </div>
@@ -544,13 +737,30 @@ if (isset($_SESSION['user'])) {
             let filter = input.value.toUpperCase();
             let cards = document.getElementsByClassName('search-item');
             for (let i = 0; i < cards.length; i++) {
-                let title = cards[i].querySelector('.book-title').innerText;
-                let author = cards[i].querySelector('.book-author').innerText;
+                // Periksa apakah elemen tersebut ada sebelum mengakses innerText
+                let titleElement = cards[i].querySelector('.book-title');
+                let authorElement = cards[i].querySelector('.book-author');
+
+                let title = titleElement ? titleElement.innerText : '';
+                let author = authorElement ? authorElement.innerText : '';
+
                 if (title.toUpperCase().indexOf(filter) > -1 || author.toUpperCase().indexOf(filter) > -1) {
-                    cards[i].style.display = "";
+                    cards[i].style.display = "flex"; // Gunakan 'flex' karena CSS asli menggunakan flex
                 } else {
                     cards[i].style.display = "none";
                 }
+            }
+        }
+        
+        // --- FITUR BARU: KONFIRMASI BUKU DITEMUKAN ---
+        function confirmFound(bookId, bookTitle) {
+            // Popup konfirmasi
+            if (confirm("Benarkah buku '" + bookTitle + "' sudah ditemukan? Tekan OK untuk konfirmasi.")) {
+                // Jika user menekan OK (Ya)
+                window.location.href = '?action=found_book&book_id=' + bookId;
+            } else {
+                // Jika user menekan Cancel (Tidak)
+                // Biarkan di halaman yang sama
             }
         }
     </script>
